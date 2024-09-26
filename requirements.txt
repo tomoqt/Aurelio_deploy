@@ -1,0 +1,15 @@
+tenacity
+anthropic
+openai
+llama-index
+llama-index-llms-anthropic
+llama-index-readers-file
+fastapi
+uvicorn
+python-dotenv
+pydantic
+nest-asyncio
+matplotlib
+PyMuPDF
+pillow
+python-multipart

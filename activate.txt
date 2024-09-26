@@ -1,0 +1,6 @@
+mentorai\Scripts\activate
+npm start
+.\start_mentorai.ps1
+
+
+npm run dev
