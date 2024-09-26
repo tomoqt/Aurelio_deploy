@@ -169,7 +169,7 @@ Settings.embed_model = get_embedding_model()
 chat_sessions: Dict[str, VectorStoreIndex] = {}
 
 # Endpoint to transcribe audio
-@app.post("voice/transcribe")
+@app.post("/voice/transcribe")
 async def transcribe_audio(audio: UploadFile = File(...)):
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
@@ -195,7 +195,7 @@ async def transcribe_audio(audio: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Endpoint for Text-to-Speech
-@app.post("voice/tts")
+@app.post("/voice/tts")
 async def text_to_speech(request: Request):
     global request_counter
     request_counter += 1
@@ -235,7 +235,7 @@ async def text_to_speech(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Endpoint to upload and index PDF
-@app.post("pdf/upload")
+@app.post("/pdf/upload")
 async def upload_pdf(pdf: UploadFile = File(...)):
     try:
         filename = pdf.filename
@@ -269,7 +269,7 @@ async def upload_pdf(pdf: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Endpoint to list uploaded PDFs
-@app.get("/pdfs")  # Add the leading slash here
+@app.get("/pdfs")
 async def list_pdfs():
     try:
         pdfs = [f for f in os.listdir(UPLOADS_DIR) if f.endswith('.pdf')]
@@ -280,7 +280,7 @@ async def list_pdfs():
         raise HTTPException(status_code=500, detail=f"Failed to retrieve PDFs: {str(e)}")
 
 # Endpoint to select a book for chat
-@app.post("book/select")
+@app.post("/book/select")
 async def select_book(selection: BookSelection):
     try:
         logger.info(f"Attempting to select book: {selection.bookId}")
@@ -308,7 +308,7 @@ async def select_book(selection: BookSelection):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Endpoint to serve PDF files
-@app.get("pdf/file/{filename}")
+@app.get("/pdf/file/{filename}")
 async def get_pdf(filename: str):
     file_path = UPLOADS_DIR / filename
     if not file_path.exists():
@@ -321,7 +321,7 @@ async def get_pdf(filename: str):
 chat_sessions: Dict[str, VectorStoreIndex] = {}
 
 # Endpoint to initialize chat session
-@app.post("chat/init")
+@app.post("/chat/init")
 async def init_chat(request: InitChatRequest):
     try:
         file_path = UPLOADS_DIR / request.bookId
@@ -352,7 +352,7 @@ async def init_chat(request: InitChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Endpoint to handle chat messages
-@app.post("chat/message")
+@app.post("/chat/message")
 async def chat_message(request: ChatMessageRequest):
     try:
         chat_engine = chat_sessions.get(request.sessionId)
@@ -368,12 +368,12 @@ async def chat_message(request: ChatMessageRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Endpoint to get total request count
-@app.get("debug/request_count")
+@app.get("/debug/request_count")
 async def get_request_count():
     return {"total_requests": request_counter}
 
 # Endpoint to get rate limiter status
-@app.get("debug/rate_limit_status")
+@app.get("/debug/rate_limit_status")
 async def get_rate_limit_status():
     return {
         "available_tokens": rate_limiter.tokens,
@@ -425,7 +425,7 @@ def generate_flashcards_for_book(book_id: str) -> List[Flashcard]:
         raise
 
 # Endpoint to generate flashcards
-@app.post("generate-flashcards", response_model=FlashcardResponse)
+@app.post("/generate-flashcards", response_model=FlashcardResponse)
 async def generate_flashcards(request: FlashcardRequest):
     try:
         flashcards = generate_flashcards_for_book(request.bookId)
