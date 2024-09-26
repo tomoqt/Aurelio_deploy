@@ -269,7 +269,7 @@ async def upload_pdf(pdf: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Endpoint to list uploaded PDFs
-@app.get("pdfs")
+@app.get("/pdfs")  # Add the leading slash here
 async def list_pdfs():
     try:
         pdfs = [f for f in os.listdir(UPLOADS_DIR) if f.endswith('.pdf')]
