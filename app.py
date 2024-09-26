@@ -17,7 +17,7 @@ from openai import OpenAI
 from llama_index.llms.anthropic import Anthropic
 
 # LlamaIndex imports
-from llama_index.core import  VectorStoreIndex,SimpleDirectoryReader,StorageContext,load_index_from_storage
+from llama_index.core import  VectorStoreIndex,SimpleDirectoryReader,StorageContext,load_index_from_storage,Document
 from llama_index.core.llms import ChatMessage, MessageRole
 
 # Import API clients and configuration
