@@ -293,11 +293,15 @@ async def select_book(selection: BookSelection):
         if not documents:
             raise HTTPException(status_code=500, detail="Failed to load document content")
 
+        # Convert the loaded data into Document objects if necessary
+        if isinstance(documents, list) and not isinstance(documents[0], Document):
+            documents = [Document(text=doc.text, metadata=doc.metadata) for doc in documents]
+
         global index
         if index is None:
             index = VectorStoreIndex.from_documents(documents)
         else:
-            index.insert(documents)
+            index.insert_nodes(documents)
         
         index.storage_context.persist(persist_dir=INDEX_STORAGE_PATH)
 
@@ -332,8 +336,12 @@ async def init_chat(request: InitChatRequest):
         if not documents:
             raise HTTPException(status_code=500, detail="Failed to load document content")
 
+        # Convert the loaded data into Document objects if necessary
+        if isinstance(documents, list) and not isinstance(documents[0], Document):
+            documents = [Document(text=doc.text, metadata=doc.metadata) for doc in documents]
+
         # Insert documents into the index
-        index.insert(documents)
+        index.insert_nodes(documents)
         index.storage_context.persist(persist_dir=INDEX_STORAGE_PATH)
 
         # Initialize chat engine
