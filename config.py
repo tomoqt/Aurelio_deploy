@@ -27,6 +27,9 @@ class Config:
     USE_LLAMAPARSE = os.getenv('USE_LLAMAPARSE', 'true').lower() == 'true'
     USE_RETRIES = os.getenv('USE_RETRIES', 'false').lower() == 'true'
     
+    # Add the USE_WHISPER_API attribute with a default value of True
+    USE_WHISPER_API = os.getenv('USE_WHISPER_API', 'true').lower() == 'true'
+    
     # LlamaIndex configurations
     EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL', 'text-embedding-ada-002')
     EMBEDDING_DIMENSION = int(os.getenv('EMBEDDING_DIMENSION', 1536))  # Dimension for ada-002
