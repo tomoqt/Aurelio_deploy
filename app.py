@@ -133,10 +133,9 @@ class InitChatRequest(BaseModel):
 class ChatMessageContent(BaseModel):
     text: str
 
-class ChatRequest(BaseModel):
+class ChatMessageRequest(BaseModel):
+    sessionId: str
     message: str
-    bookId: str
-    systemPromptType: str = 'default'
 
 # Helper functions
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
