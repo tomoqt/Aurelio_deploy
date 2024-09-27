@@ -46,6 +46,7 @@ import openai
 #import anthropic
 
 openai.api_key = Config.OPENAI_API_KEY_RAG
+client = OpenAI()
 
 # FastAPI app setup
 app = FastAPI(title="Simple Vector Store API")
@@ -136,7 +137,7 @@ class ChatMessageRequest(BaseModel):
 # Helper functions
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 async def create_speech_with_retry(text, model, voice):
-    response = openai.audio.speech.create(
+    response = client.audio.speech.create(
         model=model,
         voice=voice,
         input=text
@@ -178,10 +179,9 @@ async def transcribe_audio(audio: UploadFile = File(...)):
         
         if Config.USE_WHISPER_API:
             with open(temp_audio_path, "rb") as audio_file:
-                transcript = openai.Audio.transcribe(
+                transcript = client.audio.transcriptions.create(
                     model="whisper-1",
-                    file=audio_file,
-                    response_format="text"
+                    file=audio_file
                 )
             text = transcript
         else:
