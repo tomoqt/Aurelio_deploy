@@ -135,7 +135,7 @@ class ChatMessageContent(BaseModel):
 
 class ChatMessageRequest(BaseModel):
     sessionId: str
-    message: ChatMessageContent
+    message: str
 
 # Helper functions
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
@@ -370,7 +370,7 @@ async def chat_message(request: ChatMessageRequest):
         if not chat_engine:
             raise HTTPException(status_code=404, detail="Chat session not found")
         
-        response = chat_engine.chat(request.message.text)
+        response = chat_engine.chat(request.message)
         result = response.response
         
         return {"reply": result}
