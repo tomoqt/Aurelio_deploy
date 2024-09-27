@@ -46,7 +46,7 @@ import openai
 #import anthropic
 
 openai.api_key = Config.OPENAI_API_KEY_RAG
-client = OpenAI()
+client = OpenAI(api_key = Config.OPENAI_API_KEY_TTS)
 
 # FastAPI app setup
 app = FastAPI(title="Simple Vector Store API")
