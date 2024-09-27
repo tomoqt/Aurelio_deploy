@@ -268,7 +268,7 @@ async def upload_pdf(pdf: UploadFile = File(...)):
         logger.error(f"Error during PDF upload: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Endpoint to list uploaded PDFs
+# Endpoint to list uploaded PDF
 @app.get("/pdfs")
 async def list_pdfs():
     try:
