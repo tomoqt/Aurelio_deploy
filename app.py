@@ -136,7 +136,7 @@ class ChatMessageRequest(BaseModel):
 # Helper functions
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 async def create_speech_with_retry(text, model, voice):
-    response = openai.Audio.create(
+    response = openai.audio.speech.create(
         model=model,
         voice=voice,
         input=text
