@@ -137,7 +137,7 @@ class ChatMessageRequest(BaseModel):
     sessionId: str
     message: str
 
-# Helper functions
+## Helper functions
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 async def create_speech_with_retry(text, model, voice):
     response = client.audio.speech.create(
