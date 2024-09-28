@@ -371,7 +371,7 @@ async def chat_message(request: ChatMessageRequest):
             raise HTTPException(status_code=404, detail="Chat session not found")
         
         response = chat_engine.chat(request.message)
-        result = response.response
+        result = str(response)
         
         return {"reply": result}
     except Exception as e:
