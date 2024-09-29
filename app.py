@@ -378,7 +378,7 @@ async def chat_message(request: ChatMessageRequest):
         logger.error(f"Error in chat: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-# Endpoint to get total request count
+## Endpoint to get total request count
 @app.get("/debug/request_count")
 async def get_request_count():
     return {"total_requests": request_counter}
