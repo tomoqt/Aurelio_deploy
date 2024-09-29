@@ -13,6 +13,8 @@ matplotlib
 PyMuPDF
 pillow
 python-multipart
-azure
-python-jose
-passlib
+azure-storage-blob
+azure-identity
+python-jose[cryptography]
+passlib[bcrypt]
+pyodbc
