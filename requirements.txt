@@ -13,3 +13,6 @@ matplotlib
 PyMuPDF
 pillow
 python-multipart
+azure
+python-jose
+passlib

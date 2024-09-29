@@ -60,3 +60,17 @@ class Config:
     @classmethod
     def get_embedding_model(cls):
         return cls.EMBEDDING_MODEL
+
+    # Modified Azure-related configurations
+    AZURE_SQL_CONNECTION_STRING = os.getenv('AZURE_SQL_CONNECTION_STRING')
+    AZURE_STORAGE_CONNECTION_STRING = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
+    AZURE_STORAGE_ACCOUNT_NAME = os.getenv('AZURE_STORAGE_ACCOUNT_NAME')
+    SECRET_KEY = os.getenv('SECRET_KEY')
+    ALGORITHM = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', 30))
+
+    @staticmethod
+    def get_user_container_name(username: str) -> str:
+        # Generate a user-specific container name
+        # This ensures each user has their own container
+        return f"user-{username.lower()}-container"
