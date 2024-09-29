@@ -362,7 +362,7 @@ async def init_chat(request: InitChatRequest):
         logger.error(f"Error initializing chat: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-# Endpoint to handle chat messages
+## Endpoint to handle chat messages
 @app.post("/chat/message")
 async def chat_message(request: ChatMessageRequest):
     try:
