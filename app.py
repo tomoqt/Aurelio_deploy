@@ -158,6 +158,12 @@ class ChatMessageRequest(BaseModel):
     sessionId: str
     message: str
 
+class UserRegistration(BaseModel):
+    username: str
+    password: str
+    email: str
+    full_name: str
+
 ### Helper functions
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 async def create_speech_with_retry(text, model, voice):
@@ -585,17 +591,16 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/register")
-async def register_user(username: str, password: str, email: str, full_name: str):
+async def register_user(user: UserRegistration):
     conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
     cursor = conn.cursor()
-    hashed_password = get_password_hash(password)
+    hashed_password = get_password_hash(user.password)
     cursor.execute("INSERT INTO users (username, hashed_password, email, full_name, disabled) VALUES (?, ?, ?, ?, ?)",
-                   username, hashed_password, email, full_name, False)
+                   user.username, hashed_password, user.email, user.full_name, False)
     conn.commit()
     conn.close()
     return {"message": "User registered successfully"}
 ##
 if __name__ == "__main__":
-    import uvicorn
     logger.info(f"Starting FastAPI server on port {Config.FASTAPI_PORT}")
     uvicorn.run(app, host="0.0.0.0", port=Config.FASTAPI_PORT)
