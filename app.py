@@ -577,29 +577,39 @@ def authenticate_user(username: str, password: str):
 
 @app.post("/token", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = authenticate_user(form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
+    try:
+        user = authenticate_user(form_data.username, form_data.password)
+        if not user:
+            raise HTTPException(
+                status_code=401,
+                detail="Incorrect username or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        access_token_expires = timedelta(minutes=Config.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user.username}, expires_delta=access_token_expires
         )
-    access_token_expires = timedelta(minutes=Config.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+        return {"access_token": access_token, "token_type": "bearer"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error during login: {str(e)}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred during login")
 
 @app.post("/register")
 async def register_user(user: UserRegistration):
-    conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
-    cursor = conn.cursor()
-    hashed_password = get_password_hash(user.password)
-    cursor.execute("INSERT INTO users (username, hashed_password, email, full_name, disabled) VALUES (?, ?, ?, ?, ?)",
-                   user.username, hashed_password, user.email, user.full_name, False)
-    conn.commit()
-    conn.close()
-    return {"message": "User registered successfully"}
+    try:
+        conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
+        cursor = conn.cursor()
+        hashed_password = get_password_hash(user.password)
+        cursor.execute("INSERT INTO users (username, hashed_password, email, full_name, disabled) VALUES (?, ?, ?, ?, ?)",
+                       user.username, hashed_password, user.email, user.full_name, False)
+        conn.commit()
+        conn.close()
+        return {"message": "User registered successfully"}
+    except Exception as e:
+        logger.error(f"Error during user registration: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to register user: {str(e)}")
 ###
 if __name__ == "__main__":
     logger.info(f"Starting FastAPI server on port {Config.FASTAPI_PORT}")
