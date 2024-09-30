@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_exponential
 import uuid
-from typing import List, Dict
+from typing import List, Dict, Optional
 from openai import OpenAI
 from llama_index.llms.anthropic import Anthropic
 import pyodbc
@@ -115,6 +115,19 @@ rate_limiter = RateLimiter(rate=1, capacity=5)
 request_counter = 0
 
 # Pydantic models
+class User(BaseModel):
+    username: str
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    disabled: Optional[bool] = None
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
 class BookSelection(BaseModel):
     bookId: str
 
@@ -531,31 +544,20 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     encoded_jwt = jwt.encode(to_encode, Config.SECRET_KEY, algorithm=Config.ALGORITHM)
     return encoded_jwt
 
-# User model
-class User(BaseModel):
-    username: str
-    email: str = None
-    full_name: str = None
-    disabled: bool = None
-
-# Token model
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-
-# TokenData model
-class TokenData(BaseModel):
-    username: str = None
-
 # Function to get user from database
 def get_user(username: str):
     conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM users WHERE username = ?", username)
-    user = cursor.fetchone()
+    user_data = cursor.fetchone()
     conn.close()
-    if user:
-        return User(username=user.username, email=user.email, full_name=user.full_name, disabled=user.disabled)
+    if user_data:
+        return User(
+            username=user_data.username,
+            email=user_data.email,
+            full_name=user_data.full_name,
+            disabled=user_data.disabled
+        )
 
 # Function to authenticate user
 def authenticate_user(username: str, password: str):
@@ -565,32 +567,6 @@ def authenticate_user(username: str, password: str):
     if not verify_password(password, user.hashed_password):
         return False
     return user
-
-# Function to get current user
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    credentials_exception = HTTPException(
-        status_code=401,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=[Config.ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-        token_data = TokenData(username=username)
-    except JWTError:
-        raise credentials_exception
-    user = get_user(username=token_data.username)
-    if user is None:
-        raise credentials_exception
-    return user
-
-# Function to get current active user
-async def get_current_active_user(current_user: User = Depends(get_current_user)):
-    if current_user.disabled:
-        raise HTTPException(status_code=400, detail="Inactive user")
-    return current_user
 
 @app.post("/token", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
