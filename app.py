@@ -255,6 +255,33 @@ def get_user_container_client(username: str):
         container_client.create_container()
     return container_client
 
+# Add these functions after the User model definition
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=401,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=[Config.ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+        token_data = TokenData(username=username)
+    except JWTError:
+        raise credentials_exception
+    user = get_user(username=token_data.username)
+    if user is None:
+        raise credentials_exception
+    return user
+
+async def get_current_active_user(current_user: User = Depends(get_current_user)):
+    if current_user.disabled:
+        raise HTTPException(status_code=400, detail="Inactive user")
+    return current_user
+
 @app.post("/pdf/upload")
 async def upload_pdf(pdf: UploadFile = File(...), current_user: User = Depends(get_current_active_user)):
     try:
