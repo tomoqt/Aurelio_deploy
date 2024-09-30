@@ -594,7 +594,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         raise
     except Exception as e:
         logger.error(f"Error during login: {str(e)}")
-        raise HTTPException(status_code=500, detail="An unexpected error occurred during login")
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred during login: {str(e)}")
 
 @app.post("/register")
 async def register_user(user: UserRegistration):
