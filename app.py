@@ -121,6 +121,7 @@ class User(BaseModel):
     email: Optional[str] = None
     full_name: Optional[str] = None
     disabled: Optional[bool] = None
+    hashed_password: str  # Add this line
 
 class TokenData(BaseModel):
     username: Optional[str] = None
@@ -563,7 +564,8 @@ def get_user(username: str):
             username=user_data.username,
             email=user_data.email,
             full_name=user_data.full_name,
-            disabled=user_data.disabled
+            disabled=user_data.disabled,
+            hashed_password=user_data.hashed_password  # Add this line
         )
 
 # Function to authenticate user
