@@ -601,6 +601,21 @@ async def register_user(user: UserRegistration):
     try:
         conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
         cursor = conn.cursor()
+
+        # Check if the users table exists, if not, create it
+        cursor.execute("""
+        IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='users' AND xtype='U')
+        CREATE TABLE users (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            username NVARCHAR(50) UNIQUE NOT NULL,
+            hashed_password NVARCHAR(100) NOT NULL,
+            email NVARCHAR(100) UNIQUE NOT NULL,
+            full_name NVARCHAR(100) NOT NULL,
+            disabled BIT NOT NULL DEFAULT 0
+        )
+        """)
+        conn.commit()
+
         hashed_password = get_password_hash(user.password)
         cursor.execute("INSERT INTO users (username, hashed_password, email, full_name, disabled) VALUES (?, ?, ?, ?, ?)",
                        user.username, hashed_password, user.email, user.full_name, False)
