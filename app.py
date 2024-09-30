@@ -23,7 +23,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 import uvicorn
-
+from config import Config
 # LlamaIndex imports
 from llama_index.core import  VectorStoreIndex,SimpleDirectoryReader,StorageContext,load_index_from_storage,Document
 from llama_index.core.llms import ChatMessage, MessageRole
