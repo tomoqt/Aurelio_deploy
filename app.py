@@ -600,7 +600,7 @@ async def register_user(user: UserRegistration):
     conn.commit()
     conn.close()
     return {"message": "User registered successfully"}
-##
+###
 if __name__ == "__main__":
     logger.info(f"Starting FastAPI server on port {Config.FASTAPI_PORT}")
     uvicorn.run(app, host="0.0.0.0", port=Config.FASTAPI_PORT)
