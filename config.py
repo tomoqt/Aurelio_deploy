@@ -1,6 +1,7 @@
 # config.py
 import os
 from dotenv import load_dotenv
+import re  # Add this import
 
 # Load environment variables from .env file
 load_dotenv()
@@ -73,7 +74,11 @@ class Config:
     ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', 30))
 
     @staticmethod
+    def sanitize_username(username: str) -> str:
+        # Remove any character that is not a lowercase letter or number
+        return re.sub(r'[^a-z0-9]', '', username.lower())
+
+    @staticmethod
     def get_user_container_name(username: str) -> str:
-        # Generate a user-specific container name
-        # This ensures each user has their own container
-        return f"user-{username.lower()}-container"
+        sanitized_username = Config.sanitize_username(username)
+        return f"user-{sanitized_username}-container"
