@@ -314,13 +314,16 @@ async def upload_pdf(pdf: UploadFile = File(...), current_user: User = Depends(g
         content = await pdf.read()
         blob_client.upload_blob(content, overwrite=True)
         
-        logger.info(f"PDF uploaded: {filename} for user {current_user.username}")
+        logger.info(f"PDF uploaded to Azure Blob Storage: {filename} for user {current_user.username}")
         
-        # Write the uploaded content to a temporary file and use input_files instead of blob
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
-            temp_file.write(content)
-            temp_file_path = temp_file.name
-        documents = SimpleDirectoryReader(input_files=[temp_file_path]).load_data()
+        # Save the uploaded PDF to UPLOADS_DIR to make it accessible for selection
+        upload_path = UPLOADS_DIR / filename
+        with open(upload_path, "wb") as f:
+            f.write(content)
+        logger.info(f"PDF saved locally at: {upload_path}")
+        
+        # Load documents from the saved PDF file
+        documents = SimpleDirectoryReader(input_files=[str(upload_path)]).load_data()
         
         global index
         if index is None:
