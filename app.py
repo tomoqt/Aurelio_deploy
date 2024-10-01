@@ -87,7 +87,7 @@ UPLOADS_DIR = BASE_DIR / 'pdfs' / 'uploads'
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 logger.info(f"Uploads directory set to: {UPLOADS_DIR}")
 
-## Rate limiter class
+### Rate limiter class
 class RateLimiter:
     def __init__(self, rate, capacity):
         self.rate = rate
