@@ -316,7 +316,7 @@ async def upload_pdf(pdf: UploadFile = File(...), current_user: User = Depends(g
         
         logger.info(f"PDF uploaded to Azure Blob Storage: {filename} for user {current_user.username}")
         
-        # Save the uploaded PDF to UPLOADS_DIR to make it accessible for selection
+        # Always save the uploaded PDF to UPLOADS_DIR
         upload_path = UPLOADS_DIR / filename
         with open(upload_path, "wb") as f:
             f.write(content)
@@ -373,9 +373,24 @@ async def select_book(selection: BookSelection, current_user: User = Depends(get
     try:
         logger.info(f"Attempting to select book: {selection.bookId}")
         file_path = UPLOADS_DIR / selection.bookId
+
         if not file_path.exists():
-            logger.warning(f"Book not found: {selection.bookId}")
-            raise HTTPException(status_code=404, detail="Book not found")
+            logger.info(f"File {selection.bookId} not found in UPLOADS_DIR. Attempting to download from Blob Storage.")
+            # Attempt to download from Blob Storage
+            container_client = get_user_container_client(current_user.username)
+            blob_client = container_client.get_blob_client(selection.bookId)
+            if blob_client.exists():
+                try:
+                    with open(file_path, "wb") as f:
+                        download_stream = blob_client.download_blob()
+                        f.write(download_stream.readall())
+                    logger.info(f"Downloaded {selection.bookId} from Blob Storage to UPLOADS_DIR.")
+                except Exception as download_error:
+                    logger.error(f"Error downloading file from Blob Storage: {str(download_error)}")
+                    raise HTTPException(status_code=500, detail="Failed to download file from storage")
+            else:
+                logger.warning(f"Book not found in Blob Storage: {selection.bookId}")
+                raise HTTPException(status_code=404, detail="Book not found in storage")
 
         documents = SimpleDirectoryReader(input_files=[str(file_path)]).load_data()
         if not documents:
@@ -390,14 +405,16 @@ async def select_book(selection: BookSelection, current_user: User = Depends(get
             index = VectorStoreIndex.from_documents(documents)
         else:
             index.insert_nodes(documents)
-        
+
         index.storage_context.persist(persist_dir=INDEX_STORAGE_PATH)
 
         logger.info(f"Book selected and indexed successfully: {selection.bookId}")
         return {"message": "Book selected and indexed successfully", "book_id": selection.bookId}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error selecting book: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
 
 # Endpoint to initialize chat session
 @app.post("/chat/init")
