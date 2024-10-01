@@ -117,11 +117,12 @@ request_counter = 0
 
 # Pydantic models
 class User(BaseModel):
+    id: int  # Add this line
     username: str
     email: Optional[str] = None
     full_name: Optional[str] = None
     disabled: Optional[bool] = None
-    hashed_password: str  # Add this line
+    hashed_password: str  # Keep existing fields
 
 class TokenData(BaseModel):
     username: Optional[str] = None
@@ -552,11 +553,12 @@ def get_user(username: str):
     conn.close()
     if user_data:
         return User(
+            id=user_data.id,  # Map the 'id' from the database to the User model
             username=user_data.username,
             email=user_data.email,
             full_name=user_data.full_name,
             disabled=user_data.disabled,
-            hashed_password=user_data.hashed_password  # Add this line
+            hashed_password=user_data.hashed_password
         )
 
 # Function to authenticate user
@@ -613,8 +615,13 @@ async def register_user(user: UserRegistration):
         cursor.execute("INSERT INTO users (username, hashed_password, email, full_name, disabled) VALUES (?, ?, ?, ?, ?)",
                        user.username, hashed_password, user.email, user.full_name, False)
         conn.commit()
+
+        # Fetch the newly created user's ID
+        cursor.execute("SELECT id FROM users WHERE username = ?", user.username)
+        user_id = cursor.fetchone().id  # Ensure 'id' is fetched
+
         conn.close()
-        return {"message": "User registered successfully"}
+        return {"message": "User registered successfully", "user_id": user_id}  # Optionally return user_id
     except Exception as e:
         logger.error(f"Error during user registration: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to register user: {str(e)}")
