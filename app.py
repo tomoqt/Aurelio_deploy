@@ -315,10 +315,11 @@ async def upload_pdf(pdf: UploadFile = File(...), current_user: User = Depends(g
         
         logger.info(f"PDF uploaded: {filename} for user {current_user.username}")
         
-        # Index the document (you may need to modify this part to work with blob storage)
-        documents = SimpleDirectoryReader(blob=content).load_data()
-        if not documents:
-            raise HTTPException(status_code=500, detail="Failed to load document content")
+        # Write the uploaded content to a temporary file and use input_files instead of blob
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+        documents = SimpleDirectoryReader(input_files=[temp_file_path]).load_data()
         
         global index
         if index is None:
