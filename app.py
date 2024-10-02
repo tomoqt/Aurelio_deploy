@@ -8,7 +8,7 @@ import shutil
 import nest_asyncio
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse  # Add StreamingResponse here
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_exponential
 import uuid
