@@ -215,7 +215,7 @@ async def transcribe_audio(audio: UploadFile = File(...)):
                     model="whisper-1",
                     file=audio_file
                 )
-            text = transcript
+            text = transcript.text  # Extract the transcribed text
         else:
             # Placeholder for local Whisper implementation if needed
             text = "Transcription functionality is not enabled."
