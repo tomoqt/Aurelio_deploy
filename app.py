@@ -174,7 +174,7 @@ async def create_speech_with_retry(text, model, voice):
         voice=voice,
         input=text
     )
-    return response
+    return response.content
 
 def get_embedding_model():
 
