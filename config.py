@@ -2,10 +2,11 @@
 import os
 from dotenv import load_dotenv
 import re  # Add this import
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, validator  # Add validator here
 from enum import Enum
 from datetime import datetime
 from typing import Optional, List, Dict
+import pyodbc  # Add this import
 
 # Load environment variables from .env file
 load_dotenv()
