@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 import shutil
 import nest_asyncio
-from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Depends
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Depends, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse  # Add StreamingResponse here
 from pydantic import BaseModel
@@ -23,7 +23,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 import uvicorn
-from config import Config
+from config import Config, User, UserRole, Material, AssignMaterialRequest
 # LlamaIndex imports
 from llama_index.core import  VectorStoreIndex,SimpleDirectoryReader,StorageContext,load_index_from_storage,Document
 from llama_index.core.llms import ChatMessage, MessageRole
@@ -123,9 +123,11 @@ class User(BaseModel):
     full_name: Optional[str] = None
     disabled: Optional[bool] = None
     hashed_password: str  # Keep existing fields
+    role: UserRole
 
 class TokenData(BaseModel):
     username: Optional[str] = None
+    role: Optional[UserRole] = None
 
 class Token(BaseModel):
     access_token: str
@@ -578,7 +580,8 @@ def get_user(username: str):
             email=user_data.email,
             full_name=user_data.full_name,
             disabled=user_data.disabled,
-            hashed_password=user_data.hashed_password
+            hashed_password=user_data.hashed_password,
+            role=UserRole(user_data.role)
         )
 
 # Function to authenticate user
@@ -626,25 +629,135 @@ async def register_user(user: UserRegistration):
             hashed_password NVARCHAR(100) NOT NULL,
             email NVARCHAR(100) UNIQUE NOT NULL,
             full_name NVARCHAR(100) NOT NULL,
-            disabled BIT NOT NULL DEFAULT 0
+            disabled BIT NOT NULL DEFAULT 0,
+            role NVARCHAR(10) NOT NULL DEFAULT 'student'
         )
         """)
         conn.commit()
 
         hashed_password = get_password_hash(user.password)
-        cursor.execute("INSERT INTO users (username, hashed_password, email, full_name, disabled) VALUES (?, ?, ?, ?, ?)",
-                       user.username, hashed_password, user.email, user.full_name, False)
+        cursor.execute("INSERT INTO users (username, hashed_password, email, full_name, disabled, role) VALUES (?, ?, ?, ?, ?, ?)",
+                       user.username, hashed_password, user.email, user.full_name, False, UserRole.student)
         conn.commit()
 
-        # Fetch the newly created user's ID
         cursor.execute("SELECT id FROM users WHERE username = ?", user.username)
-        user_id = cursor.fetchone().id  # Ensure 'id' is fetched
+        user_id = cursor.fetchone().id
 
         conn.close()
-        return {"message": "User registered successfully", "user_id": user_id}  # Optionally return user_id
+        return {"message": "User registered successfully", "user_id": user_id}
     except Exception as e:
         logger.error(f"Error during user registration: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to register user: {str(e)}")
+
+def get_current_user_with_role(required_role: UserRole):
+    async def current_user_with_role(token: str = Depends(oauth2_scheme)):
+        try:
+            payload = jwt.decode(token, Config.SECRET_KEY, algorithms=[Config.ALGORITHM])
+            username: str = payload.get("sub")
+            if username is None:
+                raise credentials_exception
+            token_data = TokenData(username=username, role=payload.get("role"))
+        except JWTError:
+            raise credentials_exception
+        user = Config.get_user(username=token_data.username)
+        if user is None:
+            raise credentials_exception
+        if user.role != required_role:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return user
+    return current_user_with_role
+
+@app.get("/control-panel/data", response_model=Dict[str, List[User] or List[Material]])
+async def get_control_panel_data(current_user: User = Security(get_current_user_with_role(UserRole.teacher))):
+    try:
+        conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
+        cursor = conn.cursor()
+
+        # Fetch students assigned by this teacher
+        cursor.execute("""
+            SELECT DISTINCT u.id, u.username, u.email, u.full_name, u.disabled, u.role
+            FROM users u
+            JOIN assignments a ON u.id = a.student_id
+            WHERE a.teacher_id = ?
+        """, current_user.id)
+        students = cursor.fetchall()
+        student_list = [User(id=stu.id, username=stu.username, email=stu.email, full_name=stu.full_name, disabled=stu.disabled, role=UserRole(stu.role)) for stu in students]
+
+        # Fetch all available materials
+        cursor.execute("SELECT id, title, description FROM materials")
+        materials = cursor.fetchall()
+        material_list = [Material(id=mat.id, title=mat.title, description=mat.description) for mat in materials]
+
+        conn.close()
+        return {"students": student_list, "materials": material_list}
+    except Exception as e:
+        logger.error(f"Error fetching control panel data: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch control panel data")
+
+@app.post("/assign-material")
+async def assign_material(request: AssignMaterialRequest, current_user: User = Security(get_current_user_with_role(UserRole.teacher))):
+    try:
+        conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
+        cursor = conn.cursor()
+        
+        # Check if the student exists and is assigned to this teacher
+        cursor.execute("SELECT 1 FROM assignments WHERE student_id = ? AND teacher_id = ?", request.studentId, current_user.id)
+        if not cursor.fetchone():
+            raise HTTPException(status_code=400, detail="Student not found or not assigned to this teacher")
+        
+        # Insert the new assignment
+        cursor.execute("INSERT INTO assignments (student_id, material_id, teacher_id, assigned_at) VALUES (?, ?, ?, GETDATE())",
+                       request.studentId, request.materialId, current_user.id)
+        conn.commit()
+        conn.close()
+        
+        return {"message": "Material assigned successfully"}
+    except Exception as e:
+        logger.error(f"Error assigning material: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to assign material")
+
+@app.get("/materials", response_model=List[Material])
+async def get_all_materials(current_user: User = Security(get_current_user_with_role(UserRole.teacher))):
+    try:
+        conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, title, description FROM materials")
+        materials = cursor.fetchall()
+        conn.close()
+        return [Material(id=mat.id, title=mat.title, description=mat.description) for mat in materials]
+    except Exception as e:
+        logger.error(f"Error fetching materials: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch materials")
+
+@app.get("/students/{student_id}/assigned-materials", response_model=List[Material])
+async def get_assigned_materials(student_id: int, current_user: User = Depends(get_current_active_user)):
+    try:
+        if current_user.role == UserRole.student and current_user.id != student_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
+        cursor = conn.cursor()
+        
+        if current_user.role == UserRole.teacher:
+            # Check if the student is assigned to this teacher
+            cursor.execute("SELECT 1 FROM assignments WHERE student_id = ? AND teacher_id = ?", student_id, current_user.id)
+            if not cursor.fetchone():
+                raise HTTPException(status_code=403, detail="Access denied")
+        
+        cursor.execute("""
+            SELECT m.id, m.title, m.description
+            FROM materials m
+            JOIN assignments a ON m.id = a.material_id
+            WHERE a.student_id = ?
+        """, student_id)
+        materials = cursor.fetchall()
+        conn.close()
+        
+        return [Material(id=mat.id, title=mat.title, description=mat.description) for mat in materials]
+    except Exception as e:
+        logger.error(f"Error fetching assigned materials: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch assigned materials")
+
 ###
 if __name__ == "__main__":
     logger.info(f"Starting FastAPI server on port {Config.FASTAPI_PORT}")

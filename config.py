@@ -2,6 +2,10 @@
 import os
 from dotenv import load_dotenv
 import re  # Add this import
+from pydantic import BaseModel, EmailStr
+from enum import Enum
+from datetime import datetime
+from typing import Optional, List, Dict
 
 # Load environment variables from .env file
 load_dotenv()
@@ -82,3 +86,59 @@ class Config:
     def get_user_container_name(username: str) -> str:
         sanitized_username = Config.sanitize_username(username)
         return f"user-{sanitized_username}-container"
+
+    @staticmethod
+    def get_user(username: str):
+        conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, username, email, full_name, disabled, hashed_password, role FROM users WHERE username = ?", username)
+        user_data = cursor.fetchone()
+        conn.close()
+        if user_data:
+            return User(
+                id=user_data.id,
+                username=user_data.username,
+                email=user_data.email,
+                full_name=user_data.full_name,
+                disabled=user_data.disabled,
+                hashed_password=user_data.hashed_password,
+                role=UserRole(user_data.role)
+            )
+
+class UserRole(str, Enum):
+    student = 'student'
+    teacher = 'teacher'
+
+class User(BaseModel):
+    id: int
+    username: str
+    email: EmailStr
+    full_name: str
+    disabled: bool
+    hashed_password: str
+    role: UserRole
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
+    role: Optional[UserRole] = None
+
+class Material(BaseModel):
+    id: str
+    title: str
+    description: str
+
+class Assignment(BaseModel):
+    id: int
+    student_id: int
+    material_id: str
+    assigned_at: datetime
+
+class AssignMaterialRequest(BaseModel):
+    studentId: int
+    materialId: str
+
+    @validator('materialId')
+    def validate_material_id(cls, v):
+        if not v.startswith('material'):
+            raise ValueError('Invalid material ID format')
+        return v
