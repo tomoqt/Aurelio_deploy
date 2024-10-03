@@ -182,8 +182,10 @@ class ProfileUpdate(BaseModel):
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 
+# Add this line before the get_current_user function
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-# Add this function to get the current user
+# Now define the get_current_user function
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -358,9 +360,6 @@ def get_user_container_client(username: str):
     if not container_client.exists():
         container_client.create_container()
     return container_client
-
-# Add these functions after the User model definition
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 @app.post("/pdf/upload")
 async def upload_pdf(pdf: UploadFile = File(...), current_user: User = Depends(get_current_active_user)):
