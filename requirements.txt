@@ -18,3 +18,4 @@ azure-identity
 python-jose[cryptography]
 passlib[bcrypt]
 pyodbc
+pydantic[email]
