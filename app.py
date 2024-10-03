@@ -167,6 +167,7 @@ class UserRegistration(BaseModel):
     password: str
     email: str
     full_name: str
+    role: UserRole = UserRole.student  # Default to student role
 
 ### Helper functions
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
@@ -635,9 +636,18 @@ async def register_user(user: UserRegistration):
         """)
         conn.commit()
 
+        # Check if the role column exists, if not, add it
+        cursor.execute("""
+        IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('users') AND name = 'role')
+        BEGIN
+            ALTER TABLE users ADD role NVARCHAR(10) NOT NULL DEFAULT 'student'
+        END
+        """)
+        conn.commit()
+
         hashed_password = get_password_hash(user.password)
         cursor.execute("INSERT INTO users (username, hashed_password, email, full_name, disabled, role) VALUES (?, ?, ?, ?, ?, ?)",
-                       user.username, hashed_password, user.email, user.full_name, False, UserRole.student)
+                       user.username, hashed_password, user.email, user.full_name, False, user.role.value)
         conn.commit()
 
         cursor.execute("SELECT id FROM users WHERE username = ?", user.username)
