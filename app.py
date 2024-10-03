@@ -169,6 +169,53 @@ class UserRegistration(BaseModel):
     full_name: str
     role: UserRole = UserRole.student  # Default to student role
 
+# New imports
+from fastapi import Body
+from pydantic import BaseModel, EmailStr
+
+# New Pydantic model for profile update
+class ProfileUpdate(BaseModel):
+    email: Optional[EmailStr] = None
+    full_name: Optional[str] = None
+
+@app.get("/profile", response_model=User)
+async def get_profile(current_user: User = Depends(get_current_active_user)):
+    return current_user
+
+@app.put("/profile", response_model=User)
+async def update_profile(
+    profile_update: ProfileUpdate,
+    current_user: User = Depends(get_current_active_user)
+):
+    try:
+        conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
+        cursor = conn.cursor()
+
+        update_fields = []
+        update_values = []
+
+        if profile_update.email is not None:
+            update_fields.append("email = ?")
+            update_values.append(profile_update.email)
+            current_user.email = profile_update.email
+
+        if profile_update.full_name is not None:
+            update_fields.append("full_name = ?")
+            update_values.append(profile_update.full_name)
+            current_user.full_name = profile_update.full_name
+
+        if update_fields:
+            update_query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = ?"
+            update_values.append(current_user.id)
+            cursor.execute(update_query, update_values)
+            conn.commit()
+
+        conn.close()
+        return current_user
+    except Exception as e:
+        logger.error(f"Error updating profile: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to update profile: {str(e)}")
+
 ### Helper functions
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 async def create_speech_with_retry(text, model, voice):
