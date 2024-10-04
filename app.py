@@ -16,7 +16,7 @@ from typing import List, Dict, Optional
 from openai import OpenAI
 from llama_index.llms.anthropic import Anthropic
 import pyodbc
-from azure.storage.blob import BlobServiceClient
+from azure.storage.blob import BlobServiceClient, ContainerClient
 from azure.identity import DefaultAzureCredential
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
@@ -769,38 +769,58 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
         if not cursor.fetchone():
             raise HTTPException(status_code=400, detail="Student not found or not assigned to this teacher")
         
+        # Check if the material (PDF) exists in the teacher's container
+        container_client = get_user_container_client(current_user.username)
+        blob_client = container_client.get_blob_client(request.materialId)
+        if not blob_client.exists():
+            raise HTTPException(status_code=404, detail="Material not found in teacher's bookshelf")
+        
         # Insert the new assignment
-        cursor.execute("INSERT INTO assignments (student_id, material_id, teacher_id, assigned_at) VALUES (?, ?, ?, GETDATE())",
-                       request.studentId, request.materialId, current_user.id)
+        cursor.execute("""
+            IF NOT EXISTS (SELECT 1 FROM assignments WHERE student_id = ? AND material_id = ? AND teacher_id = ?)
+            INSERT INTO assignments (student_id, material_id, teacher_id, assigned_at) 
+            VALUES (?, ?, ?, GETDATE())
+        """, request.studentId, request.materialId, current_user.id, request.studentId, request.materialId, current_user.id)
         conn.commit()
         conn.close()
+        
+        # Copy the PDF to the student's container
+        student = get_user(request.studentId)
+        if not student:
+            raise HTTPException(status_code=404, detail="Student not found")
+        
+        student_container_client = get_user_container_client(student.username)
+        source_blob = container_client.get_blob_client(request.materialId)
+        dest_blob = student_container_client.get_blob_client(request.materialId)
+        
+        # Copy the blob
+        dest_blob.start_copy_from_url(source_blob.url)
         
         return {"message": "Material assigned successfully"}
     except Exception as e:
         logger.error(f"Error assigning material: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to assign material")
+        raise HTTPException(status_code=500, detail=f"Failed to assign material: {str(e)}")
 
 @app.get("/materials", response_model=List[Material])
 async def get_all_materials(current_user: User = Security(get_current_user_with_role(UserRole.teacher))):
     try:
-        conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
-        cursor = conn.cursor()
-
-        # Check if the materials table exists, if not, create it
-        cursor.execute("""
-        IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='materials' AND xtype='U')
-        CREATE TABLE materials (
-            id NVARCHAR(50) PRIMARY KEY,
-            title NVARCHAR(100) NOT NULL,
-            description NVARCHAR(MAX)
-        )
-        """)
-        conn.commit()
-
-        cursor.execute("SELECT id, title, description FROM materials")
-        materials = cursor.fetchall()
-        conn.close()
-        return [Material(id=mat.id, title=mat.title, description=mat.description) for mat in materials]
+        # Get the container client for the user's bookshelf
+        container_client = get_user_container_client(current_user.username)
+        
+        # List all blobs (PDFs) in the container
+        blobs = container_client.list_blobs()
+        
+        # Convert blobs to Material objects
+        materials = [
+            Material(
+                id=blob.name,
+                title=blob.name,  # Using filename as title
+                description=f"PDF file: {blob.name}"  # Simple description
+            )
+            for blob in blobs
+        ]
+        
+        return materials
     except Exception as e:
         logger.error(f"Error fetching materials: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch materials: {str(e)}")
@@ -820,19 +840,36 @@ async def get_assigned_materials(student_id: int, current_user: User = Depends(g
             if not cursor.fetchone():
                 raise HTTPException(status_code=403, detail="Access denied")
         
+        # Get the assigned materials from the assignments table
         cursor.execute("""
-            SELECT m.id, m.title, m.description
-            FROM materials m
-            JOIN assignments a ON m.id = a.material_id
-            WHERE a.student_id = ?
+            SELECT material_id
+            FROM assignments
+            WHERE student_id = ?
         """, student_id)
-        materials = cursor.fetchall()
+        assigned_materials = cursor.fetchall()
         conn.close()
         
-        return [Material(id=mat.id, title=mat.title, description=mat.description) for mat in materials]
+        # Get the student's container client
+        student = get_user(student_id)
+        if not student:
+            raise HTTPException(status_code=404, detail="Student not found")
+        container_client = get_user_container_client(student.username)
+        
+        # Create Material objects for each assigned PDF
+        materials = []
+        for material in assigned_materials:
+            blob_client = container_client.get_blob_client(material.material_id)
+            if blob_client.exists():
+                materials.append(Material(
+                    id=material.material_id,
+                    title=material.material_id,  # Using filename as title
+                    description=f"Assigned PDF: {material.material_id}"
+                ))
+        
+        return materials
     except Exception as e:
         logger.error(f"Error fetching assigned materials: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to fetch assigned materials")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch assigned materials: {str(e)}")
 
 ###
 if __name__ == "__main__":
