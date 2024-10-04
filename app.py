@@ -748,9 +748,16 @@ async def get_control_panel_data(current_user: User = Security(get_current_user_
         student_list = [User(id=stu.id, username=stu.username, email=stu.email, full_name=stu.full_name, disabled=stu.disabled, role=UserRole(stu.role)) for stu in students]
 
         # Fetch all available materials
-        cursor.execute("SELECT id, title, description FROM materials")
-        materials = cursor.fetchall()
-        material_list = [Material(id=mat.id, title=mat.title, description=mat.description) for mat in materials]
+        container_client = get_user_container_client(current_user.username)
+        blobs = container_client.list_blobs()
+        material_list = [
+            Material(
+                id=blob.name,
+                title=blob.name,
+                description=f"PDF file: {blob.name}"
+            )
+            for blob in blobs
+        ]
 
         conn.close()
         return {"students": student_list, "materials": material_list}
@@ -815,6 +822,7 @@ async def get_all_materials(current_user: User = Security(get_current_user_with_
             Material(
                 id=blob.name,
                 title=blob.name,  # Using filename as title
+                description=f"PDF file: {blob.name}"  # Adding a simple description
             )
             for blob in blobs
         ]
