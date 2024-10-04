@@ -785,13 +785,25 @@ async def get_all_materials(current_user: User = Security(get_current_user_with_
     try:
         conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
         cursor = conn.cursor()
+
+        # Check if the materials table exists, if not, create it
+        cursor.execute("""
+        IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='materials' AND xtype='U')
+        CREATE TABLE materials (
+            id NVARCHAR(50) PRIMARY KEY,
+            title NVARCHAR(100) NOT NULL,
+            description NVARCHAR(MAX)
+        )
+        """)
+        conn.commit()
+
         cursor.execute("SELECT id, title, description FROM materials")
         materials = cursor.fetchall()
         conn.close()
         return [Material(id=mat.id, title=mat.title, description=mat.description) for mat in materials]
     except Exception as e:
         logger.error(f"Error fetching materials: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to fetch materials")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch materials: {str(e)}")
 
 @app.get("/students/{student_id}/assigned-materials", response_model=List[Material])
 async def get_assigned_materials(student_id: int, current_user: User = Depends(get_current_active_user)):
