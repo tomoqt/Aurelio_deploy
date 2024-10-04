@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 import shutil
 import nest_asyncio
-from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Depends, Security
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Depends, Security, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse  # Add StreamingResponse here
 from pydantic import BaseModel
@@ -759,19 +759,23 @@ async def get_control_panel_data(current_user: User = Security(get_current_user_
         raise HTTPException(status_code=500, detail="Failed to fetch control panel data")
 
 @app.post("/assign-material")
-async def assign_material(request: AssignMaterialRequest, current_user: User = Security(get_current_user_with_role(UserRole.teacher))):
+async def assign_material(
+    student_id: str = Query(..., description="The ID of the student"),
+    material_id: str = Query(..., description="The ID of the material"),
+    current_user: User = Security(get_current_user_with_role(UserRole.teacher))
+):
     try:
         conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
         cursor = conn.cursor()
         
         # Check if the student exists and is assigned to this teacher
-        cursor.execute("SELECT 1 FROM assignments WHERE student_id = ? AND teacher_id = ?", request.studentId, current_user.id)
+        cursor.execute("SELECT 1 FROM assignments WHERE student_id = ? AND teacher_id = ?", student_id, current_user.id)
         if not cursor.fetchone():
             raise HTTPException(status_code=400, detail="Student not found or not assigned to this teacher")
         
         # Check if the material (PDF) exists in the teacher's container
         container_client = get_user_container_client(current_user.username)
-        blob_client = container_client.get_blob_client(request.materialId)
+        blob_client = container_client.get_blob_client(material_id)
         if not blob_client.exists():
             raise HTTPException(status_code=404, detail="Material not found in teacher's bookshelf")
         
@@ -780,18 +784,18 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
             IF NOT EXISTS (SELECT 1 FROM assignments WHERE student_id = ? AND material_id = ? AND teacher_id = ?)
             INSERT INTO assignments (student_id, material_id, teacher_id, assigned_at) 
             VALUES (?, ?, ?, GETDATE())
-        """, request.studentId, request.materialId, current_user.id, request.studentId, request.materialId, current_user.id)
+        """, student_id, material_id, current_user.id, student_id, material_id, current_user.id)
         conn.commit()
         conn.close()
         
         # Copy the PDF to the student's container
-        student = get_user(request.studentId)
+        student = get_user(student_id)
         if not student:
             raise HTTPException(status_code=404, detail="Student not found")
         
         student_container_client = get_user_container_client(student.username)
-        source_blob = container_client.get_blob_client(request.materialId)
-        dest_blob = student_container_client.get_blob_client(request.materialId)
+        source_blob = container_client.get_blob_client(material_id)
+        dest_blob = student_container_client.get_blob_client(material_id)
         
         # Copy the blob
         dest_blob.start_copy_from_url(source_blob.url)
@@ -804,18 +808,13 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
 @app.get("/materials", response_model=List[Material])
 async def get_all_materials(current_user: User = Security(get_current_user_with_role(UserRole.teacher))):
     try:
-        # Get the container client for the user's bookshelf
         container_client = get_user_container_client(current_user.username)
-        
-        # List all blobs (PDFs) in the container
         blobs = container_client.list_blobs()
         
-        # Convert blobs to Material objects
         materials = [
             Material(
                 id=blob.name,
                 title=blob.name,  # Using filename as title
-                description=f"PDF file: {blob.name}"  # Simple description
             )
             for blob in blobs
         ]
