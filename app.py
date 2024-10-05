@@ -796,16 +796,19 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
         """)
         conn.commit()
         
+        # Debug: Print the received studentId and materialId
+        logger.info(f"Received studentId: {request.studentId}, materialId: {request.materialId}")
+        
         # Check if the student exists
         cursor.execute("SELECT 1 FROM users WHERE id = ? AND role = ?", request.studentId, UserRole.student.value)
         if not cursor.fetchone():
-            raise HTTPException(status_code=404, detail="Student not found")
+            raise HTTPException(status_code=404, detail=f"Student with id {request.studentId} not found")
         
         # Check if the material (PDF) exists in the teacher's container
         container_client = get_user_container_client(current_user.username)
         blob_client = container_client.get_blob_client(request.materialId)
         if not blob_client.exists():
-            raise HTTPException(status_code=404, detail="Material not found in teacher's bookshelf")
+            raise HTTPException(status_code=404, detail=f"Material {request.materialId} not found in teacher's bookshelf")
         
         # Insert the new assignment
         cursor.execute("""
@@ -818,7 +821,7 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
         # Copy the PDF to the student's container
         student = get_user(request.studentId)
         if not student:
-            raise HTTPException(status_code=404, detail="Student not found")
+            raise HTTPException(status_code=404, detail=f"Student with id {request.studentId} not found")
         
         student_container_client = get_user_container_client(student.username)
         source_blob = container_client.get_blob_client(request.materialId)

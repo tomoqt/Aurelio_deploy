@@ -2,7 +2,7 @@
 import os
 from dotenv import load_dotenv
 import re  # Add this import
-from pydantic import BaseModel, EmailStr, validator  # Add validator here
+from pydantic import BaseModel, EmailStr, validator, Field  # Add validator here
 from enum import Enum
 from datetime import datetime
 from typing import Optional, List, Dict
@@ -135,12 +135,11 @@ class Assignment(BaseModel):
     assigned_at: datetime
 
 class AssignMaterialRequest(BaseModel):
-    studentId: int
-    materialId: str
+    studentId: int = Field(..., description="The ID of the student")
+    materialId: str = Field(..., description="The ID of the material (filename)")
 
-    # Removed the validator to allow materialId to accept filenames like "deck_eulero.pdf"
-    # @validator('materialId')
-    # def validate_material_id(cls, v):
-    #     if not v.startswith('material'):
-    #         raise ValueError('Invalid material ID format')
-    #     return v
+    @validator('studentId')
+    def validate_student_id(cls, v):
+        if not isinstance(v, int):
+            raise ValueError('studentId must be an integer')
+        return v
