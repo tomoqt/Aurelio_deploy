@@ -783,6 +783,19 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
         conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
         cursor = conn.cursor()
         
+        # Create assignments table if it doesn't exist
+        cursor.execute("""
+        IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='assignments' AND xtype='U')
+        CREATE TABLE assignments (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            student_id INT NOT NULL,
+            material_id NVARCHAR(255) NOT NULL,
+            teacher_id INT NOT NULL,
+            assigned_at DATETIME NOT NULL
+        )
+        """)
+        conn.commit()
+        
         # Check if the student exists
         cursor.execute("SELECT 1 FROM users WHERE id = ? AND role = ?", request.studentId, UserRole.student.value)
         if not cursor.fetchone():
