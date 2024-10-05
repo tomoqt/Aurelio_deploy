@@ -920,8 +920,10 @@ async def get_assigned_materials(student_id: int, current_user: User = Depends(g
         assigned_materials = cursor.fetchall()
         conn.close()
         
-        # Get the student's container client
-        student = get_user(student_id)
+        # Replace the following line:
+        # student = get_user(student_id)
+        student = get_user_by_id(student_id)
+        
         if not student:
             raise HTTPException(status_code=404, detail="Student not found")
         container_client = get_user_container_client(student.username)
