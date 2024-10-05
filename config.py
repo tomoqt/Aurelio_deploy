@@ -138,8 +138,9 @@ class AssignMaterialRequest(BaseModel):
     studentId: int
     materialId: str
 
-    @validator('materialId')
-    def validate_material_id(cls, v):
-        if not v.startswith('material'):
-            raise ValueError('Invalid material ID format')
-        return v
+    # Removed the validator to allow materialId to accept filenames like "deck_eulero.pdf"
+    # @validator('materialId')
+    # def validate_material_id(cls, v):
+    #     if not v.startswith('material'):
+    #         raise ValueError('Invalid material ID format')
+    #     return v
