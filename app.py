@@ -777,6 +777,23 @@ async def get_control_panel_data(current_user: User = Security(get_current_user_
         logger.error(f"Error fetching control panel data: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to fetch control panel data")
 
+def get_user_by_id(user_id: int):
+    conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, username, email, full_name, disabled, hashed_password, role FROM users WHERE id = ?", user_id)
+    user_data = cursor.fetchone()
+    conn.close()
+    if user_data:
+        return User(
+            id=user_data.id,
+            username=user_data.username,
+            email=user_data.email,
+            full_name=user_data.full_name,
+            disabled=user_data.disabled,
+            hashed_password=user_data.hashed_password,
+            role=UserRole(user_data.role)
+        )
+
 @app.post("/assign-material")
 async def assign_material(request: AssignMaterialRequest, current_user: User = Security(get_current_user_with_role(UserRole.teacher))):
     try:
@@ -819,7 +836,7 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
         conn.commit()
         
         # Copy the PDF to the student's container
-        student = get_user(request.studentId)
+        student = get_user_by_id(request.studentId)
         if not student:
             raise HTTPException(status_code=404, detail=f"Student with id {request.studentId} not found")
         
