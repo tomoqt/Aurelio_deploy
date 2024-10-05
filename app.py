@@ -823,7 +823,15 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
         logger.error(f"Unexpected error during material assignment: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="An unexpected error occurred while assigning material.")
 
-@app.get("/materials", response_model=List[Material])
+from pydantic import BaseModel
+
+class MaterialsResponse(BaseModel):
+    materials: List[Material]
+
+    class Config:
+        orm_mode = True
+
+@app.get("/materials", response_model=MaterialsResponse)
 async def get_all_materials(current_user: User = Security(get_current_user_with_role(UserRole.teacher))):
     try:
         container_client = get_user_container_client(current_user.username)
@@ -832,13 +840,15 @@ async def get_all_materials(current_user: User = Security(get_current_user_with_
         materials = [
             Material(
                 id=blob.name,
-                title=blob.name,  # Using filename as title
-                description=f"PDF file: {blob.name}"  # Adding a simple description
+                title=blob.name,
+                description=f"PDF file: {blob.name}"
             )
             for blob in blobs
         ]
         
-        return materials
+        logger.debug(f"Returning materials for user {current_user.username}: {materials}")
+        
+        return MaterialsResponse(materials=materials)
     except Exception as e:
         logger.error(f"Error fetching materials: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch materials: {str(e)}")
@@ -893,3 +903,36 @@ async def get_assigned_materials(student_id: int, current_user: User = Depends(g
 if __name__ == "__main__":
     logger.info(f"Starting FastAPI server on port {Config.FASTAPI_PORT}")
     uvicorn.run(app, host="0.0.0.0", port=Config.FASTAPI_PORT)
+
+# Define a Pydantic model for student responses
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+
+    class Config:
+        orm_mode = True
+
+# Add the /students endpoint to return all students
+@app.get("/students", response_model=List[UserResponse])
+async def get_all_students(current_user: User = Depends(get_current_active_user)):
+    try:
+        conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, username, email, full_name FROM users WHERE role = ?", UserRole.student.value)
+        students_data = cursor.fetchall()
+        students = [
+            UserResponse(
+                id=student.id,
+                username=student.username,
+                email=student.email,
+                full_name=student.full_name
+            )
+            for student in students_data
+        ]
+        logger.debug(f"Returning students: {students}")
+        return students
+    except Exception as e:
+        logger.error(f"Error fetching students: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch students: {str(e)}")
