@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse  # Add StreamingRe
 from pydantic import BaseModel
 from tenacity import retry, stop_after_attempt, wait_exponential
 import uuid
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 from openai import OpenAI
 from llama_index.llms.anthropic import Anthropic
 import pyodbc
@@ -32,7 +32,7 @@ from llama_index.core.llms import ChatMessage, MessageRole
 from api_clients import get_api_client
 from config import Config
 
-from llama_index.core import SimpleDirectoryReader, Settings
+from llama_index.core import Settings
 
 from llama_index.core.llms import ChatMessage, MessageRole
 import uuid
@@ -59,9 +59,10 @@ client = OpenAI(api_key = Config.OPENAI_API_KEY_TTS)
 # FastAPI app setup
 app = FastAPI(title="Simple Vector Store API")
 
+# CORS Middleware Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000"],  # Update with your frontend's origin
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -117,13 +118,19 @@ request_counter = 0
 
 # Pydantic models
 class User(BaseModel):
-    id: int  # Add this line
+    id: int
     username: str
     email: Optional[str] = None
     full_name: Optional[str] = None
     disabled: Optional[bool] = None
-    hashed_password: str  # Keep existing fields
+    hashed_password: str
     role: UserRole
+
+    class Config:
+        orm_mode = True
+        fields = {
+            'full_name': 'name'  # Alias 'full_name' to 'name' if necessary
+        }
 
 class TokenData(BaseModel):
     username: Optional[str] = None
@@ -731,7 +738,12 @@ def get_current_user_with_role(required_role: UserRole):
         return user
     return current_user_with_role
 
-@app.get("/control-panel/data", response_model=Dict[str, List[User] or List[Material]])
+# Define a Pydantic model for the control panel data response
+class ControlPanelData(BaseModel):
+    students: List[Dict[str, Union[int, str]]]
+    materials: List[Material]
+
+@app.get("/control-panel/data", response_model=ControlPanelData)
 async def get_control_panel_data(current_user: User = Security(get_current_user_with_role(UserRole.teacher))):
     try:
         conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
@@ -739,13 +751,13 @@ async def get_control_panel_data(current_user: User = Security(get_current_user_
 
         # Fetch students assigned by this teacher
         cursor.execute("""
-            SELECT DISTINCT u.id, u.username, u.email, u.full_name, u.disabled, u.role
+            SELECT DISTINCT u.id, u.full_name
             FROM users u
             JOIN assignments a ON u.id = a.student_id
             WHERE a.teacher_id = ?
         """, current_user.id)
         students = cursor.fetchall()
-        student_list = [User(id=stu.id, username=stu.username, email=stu.email, full_name=stu.full_name, disabled=stu.disabled, role=UserRole(stu.role)) for stu in students]
+        student_list = [{"id": stu.id, "name": stu.full_name} for stu in students]
 
         # Fetch all available materials
         container_client = get_user_container_client(current_user.username)
@@ -766,23 +778,19 @@ async def get_control_panel_data(current_user: User = Security(get_current_user_
         raise HTTPException(status_code=500, detail="Failed to fetch control panel data")
 
 @app.post("/assign-material")
-async def assign_material(
-    student_id: str = Query(..., description="The ID of the student"),
-    material_id: str = Query(..., description="The ID of the material"),
-    current_user: User = Security(get_current_user_with_role(UserRole.teacher))
-):
+async def assign_material(request: AssignMaterialRequest, current_user: User = Security(get_current_user_with_role(UserRole.teacher))):
     try:
         conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
         cursor = conn.cursor()
         
         # Check if the student exists and is assigned to this teacher
-        cursor.execute("SELECT 1 FROM assignments WHERE student_id = ? AND teacher_id = ?", student_id, current_user.id)
+        cursor.execute("SELECT 1 FROM assignments WHERE student_id = ? AND teacher_id = ?", request.student_id, current_user.id)
         if not cursor.fetchone():
             raise HTTPException(status_code=400, detail="Student not found or not assigned to this teacher")
         
         # Check if the material (PDF) exists in the teacher's container
         container_client = get_user_container_client(current_user.username)
-        blob_client = container_client.get_blob_client(material_id)
+        blob_client = container_client.get_blob_client(request.material_id)
         if not blob_client.exists():
             raise HTTPException(status_code=404, detail="Material not found in teacher's bookshelf")
         
@@ -791,26 +799,29 @@ async def assign_material(
             IF NOT EXISTS (SELECT 1 FROM assignments WHERE student_id = ? AND material_id = ? AND teacher_id = ?)
             INSERT INTO assignments (student_id, material_id, teacher_id, assigned_at) 
             VALUES (?, ?, ?, GETDATE())
-        """, student_id, material_id, current_user.id, student_id, material_id, current_user.id)
+        """, request.student_id, request.material_id, current_user.id, request.student_id, request.material_id, current_user.id)
         conn.commit()
         conn.close()
         
         # Copy the PDF to the student's container
-        student = get_user(student_id)
+        student = get_user(request.student_id)
         if not student:
             raise HTTPException(status_code=404, detail="Student not found")
         
         student_container_client = get_user_container_client(student.username)
-        source_blob = container_client.get_blob_client(material_id)
-        dest_blob = student_container_client.get_blob_client(material_id)
+        source_blob = container_client.get_blob_client(request.material_id)
+        dest_blob = student_container_client.get_blob_client(request.material_id)
         
         # Copy the blob
         dest_blob.start_copy_from_url(source_blob.url)
         
         return {"message": "Material assigned successfully"}
+    except HTTPException as he:
+        logger.warning(f"HTTPException during material assignment: {he.detail}")
+        raise he
     except Exception as e:
-        logger.error(f"Error assigning material: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to assign material: {str(e)}")
+        logger.error(f"Unexpected error during material assignment: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while assigning material.")
 
 @app.get("/materials", response_model=List[Material])
 async def get_all_materials(current_user: User = Security(get_current_user_with_role(UserRole.teacher))):
