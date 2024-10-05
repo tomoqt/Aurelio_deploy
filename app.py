@@ -784,13 +784,13 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
         cursor = conn.cursor()
         
         # Check if the student exists
-        cursor.execute("SELECT 1 FROM users WHERE id = ? AND role = ?", request.student_id, UserRole.student.value)
+        cursor.execute("SELECT 1 FROM users WHERE id = ? AND role = ?", request.studentId, UserRole.student.value)
         if not cursor.fetchone():
             raise HTTPException(status_code=404, detail="Student not found")
         
         # Check if the material (PDF) exists in the teacher's container
         container_client = get_user_container_client(current_user.username)
-        blob_client = container_client.get_blob_client(request.material_id)
+        blob_client = container_client.get_blob_client(request.materialId)
         if not blob_client.exists():
             raise HTTPException(status_code=404, detail="Material not found in teacher's bookshelf")
         
@@ -799,17 +799,17 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
             IF NOT EXISTS (SELECT 1 FROM assignments WHERE student_id = ? AND material_id = ? AND teacher_id = ?)
             INSERT INTO assignments (student_id, material_id, teacher_id, assigned_at) 
             VALUES (?, ?, ?, GETDATE())
-        """, request.student_id, request.material_id, current_user.id, request.student_id, request.material_id, current_user.id)
+        """, request.studentId, request.materialId, current_user.id, request.studentId, request.materialId, current_user.id)
         conn.commit()
         
         # Copy the PDF to the student's container
-        student = get_user(request.student_id)
+        student = get_user(request.studentId)
         if not student:
             raise HTTPException(status_code=404, detail="Student not found")
         
         student_container_client = get_user_container_client(student.username)
-        source_blob = container_client.get_blob_client(request.material_id)
-        dest_blob = student_container_client.get_blob_client(request.material_id)
+        source_blob = container_client.get_blob_client(request.materialId)
+        dest_blob = student_container_client.get_blob_client(request.materialId)
         
         # Copy the blob
         copy_operation = dest_blob.start_copy_from_url(source_blob.url)
