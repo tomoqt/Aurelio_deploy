@@ -783,10 +783,10 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
         conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
         cursor = conn.cursor()
         
-        # Check if the student exists and is assigned to this teacher
-        cursor.execute("SELECT 1 FROM assignments WHERE student_id = ? AND teacher_id = ?", request.student_id, current_user.id)
+        # Check if the student exists
+        cursor.execute("SELECT 1 FROM users WHERE id = ? AND role = ?", request.student_id, UserRole.student.value)
         if not cursor.fetchone():
-            raise HTTPException(status_code=400, detail="Student not found or not assigned to this teacher")
+            raise HTTPException(status_code=404, detail="Student not found")
         
         # Check if the material (PDF) exists in the teacher's container
         container_client = get_user_container_client(current_user.username)
@@ -801,7 +801,6 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
             VALUES (?, ?, ?, GETDATE())
         """, request.student_id, request.material_id, current_user.id, request.student_id, request.material_id, current_user.id)
         conn.commit()
-        conn.close()
         
         # Copy the PDF to the student's container
         student = get_user(request.student_id)
@@ -813,15 +812,26 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
         dest_blob = student_container_client.get_blob_client(request.material_id)
         
         # Copy the blob
-        dest_blob.start_copy_from_url(source_blob.url)
+        copy_operation = dest_blob.start_copy_from_url(source_blob.url)
         
-        return {"message": "Material assigned successfully"}
+        # Wait for the copy operation to complete
+        copy_prop = dest_blob.get_blob_properties()
+        while copy_prop.copy.status == 'pending':
+            time.sleep(1)
+            copy_prop = dest_blob.get_blob_properties()
+
+        if copy_prop.copy.status == 'success':
+            conn.close()
+            return {"message": "Material assigned successfully"}
+        else:
+            raise HTTPException(status_code=500, detail=f"Failed to copy material: {copy_prop.copy.status}")
+        
     except HTTPException as he:
         logger.warning(f"HTTPException during material assignment: {he.detail}")
         raise he
     except Exception as e:
         logger.error(f"Unexpected error during material assignment: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while assigning material.")
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred while assigning material: {str(e)}")
 
 from pydantic import BaseModel
 
