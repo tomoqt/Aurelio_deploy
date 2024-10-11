@@ -9,7 +9,7 @@ import nest_asyncio
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Depends, Security, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse  # Add StreamingResponse here
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from tenacity import retry, stop_after_attempt, wait_exponential
 import uuid
 from typing import List, Dict, Optional, Union
@@ -800,7 +800,7 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
         conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
         cursor = conn.cursor()
         
-        # Create assignments table if it doesn't exist
+        # Create assignments table if it doesn't exist (add systemPrompt column)
         cursor.execute("""
         IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='assignments' AND xtype='U')
         CREATE TABLE assignments (
@@ -808,13 +808,11 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
             student_id INT NOT NULL,
             material_id NVARCHAR(255) NOT NULL,
             teacher_id INT NOT NULL,
-            assigned_at DATETIME NOT NULL
+            assigned_at DATETIME NOT NULL,
+            system_prompt NVARCHAR(MAX) NOT NULL
         )
         """)
         conn.commit()
-        
-        # Debug: Print the received studentId and materialId
-        logger.info(f"Received studentId: {request.studentId}, materialId: {request.materialId}")
         
         # Check if the student exists
         cursor.execute("SELECT 1 FROM users WHERE id = ? AND role = ?", request.studentId, UserRole.student.value)
@@ -827,15 +825,15 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
         if not blob_client.exists():
             raise HTTPException(status_code=404, detail=f"Material {request.materialId} not found in teacher's bookshelf")
         
-        # Insert the new assignment
+        # Insert the new assignment with system prompt
         cursor.execute("""
             IF NOT EXISTS (SELECT 1 FROM assignments WHERE student_id = ? AND material_id = ? AND teacher_id = ?)
-            INSERT INTO assignments (student_id, material_id, teacher_id, assigned_at) 
-            VALUES (?, ?, ?, GETDATE())
-        """, request.studentId, request.materialId, current_user.id, request.studentId, request.materialId, current_user.id)
+            INSERT INTO assignments (student_id, material_id, teacher_id, assigned_at, system_prompt) 
+            VALUES (?, ?, ?, GETDATE(), ?)
+        """, request.studentId, request.materialId, current_user.id, request.studentId, request.materialId, current_user.id, request.systemPrompt)
         conn.commit()
         
-        # Copy the PDF to the student's container
+        # Copy the PDF to the student's container (unchanged)
         student = get_user_by_id(request.studentId)
         if not student:
             raise HTTPException(status_code=404, detail=f"Student with id {request.studentId} not found")
@@ -855,7 +853,7 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
 
         if copy_prop.copy.status == 'success':
             conn.close()
-            return {"message": "Material assigned successfully"}
+            return {"message": "Material assigned successfully with system prompt"}
         else:
             raise HTTPException(status_code=500, detail=f"Failed to copy material: {copy_prop.copy.status}")
         
@@ -911,24 +909,22 @@ async def get_assigned_materials(student_id: int, current_user: User = Depends(g
             if not cursor.fetchone():
                 raise HTTPException(status_code=403, detail="Access denied")
         
-        # Get the assigned materials from the assignments table
+        # Get the assigned materials from the assignments table (include system_prompt)
         cursor.execute("""
-            SELECT material_id
+            SELECT material_id, system_prompt
             FROM assignments
             WHERE student_id = ?
         """, student_id)
         assigned_materials = cursor.fetchall()
         conn.close()
         
-        # Replace the following line:
-        # student = get_user(student_id)
         student = get_user_by_id(student_id)
         
         if not student:
             raise HTTPException(status_code=404, detail="Student not found")
         container_client = get_user_container_client(student.username)
         
-        # Create Material objects for each assigned PDF
+        # Create Material objects for each assigned PDF (include system_prompt)
         materials = []
         for material in assigned_materials:
             blob_client = container_client.get_blob_client(material.material_id)
@@ -936,7 +932,8 @@ async def get_assigned_materials(student_id: int, current_user: User = Depends(g
                 materials.append(Material(
                     id=material.material_id,
                     title=material.material_id,  # Using filename as title
-                    description=f"Assigned PDF: {material.material_id}"
+                    description=f"Assigned PDF: {material.material_id}",
+                    system_prompt=material.system_prompt
                 ))
         
         return materials
