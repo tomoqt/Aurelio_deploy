@@ -137,6 +137,7 @@ class Assignment(BaseModel):
 class AssignMaterialRequest(BaseModel):
     studentId: int = Field(..., description="The ID of the student")
     materialId: str = Field(..., description="The ID of the material (filename)")
+    systemPrompt: str = Field(..., min_length=1)
 
     @validator('studentId')
     def validate_student_id(cls, v):
