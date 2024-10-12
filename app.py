@@ -800,20 +800,27 @@ async def assign_material(request: AssignMaterialRequest, current_user: User = S
         conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
         cursor = conn.cursor()
         
-        # Create assignments table if it doesn't exist (add systemPrompt column)
+        # Create assignments table if it doesn't exist and add system_prompt column if it doesn't exist
         cursor.execute("""
         IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='assignments' AND xtype='U')
-        CREATE TABLE assignments (
-            id INT IDENTITY(1,1) PRIMARY KEY,
-            student_id INT NOT NULL,
-            material_id NVARCHAR(255) NOT NULL,
-            teacher_id INT NOT NULL,
-            assigned_at DATETIME NOT NULL,
-            system_prompt NVARCHAR(MAX) NOT NULL
-        )
+        BEGIN
+            CREATE TABLE assignments (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                student_id INT NOT NULL,
+                material_id NVARCHAR(255) NOT NULL,
+                teacher_id INT NOT NULL,
+                assigned_at DATETIME NOT NULL,
+                system_prompt NVARCHAR(MAX) NOT NULL
+            )
+        END
+        ELSE IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('assignments') AND name = 'system_prompt')
+        BEGIN
+            ALTER TABLE assignments ADD system_prompt NVARCHAR(MAX) NOT NULL DEFAULT ''
+        END
         """)
         conn.commit()
         
+        # Rest of the function remains the same
         # Check if the student exists
         cursor.execute("SELECT 1 FROM users WHERE id = ? AND role = ?", request.studentId, UserRole.student.value)
         if not cursor.fetchone():
