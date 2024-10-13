@@ -480,7 +480,7 @@ async def select_book(selection: BookSelection, current_user: User = Depends(get
         logger.error(f"Error selecting book: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
 
-# Endpoint to initialize chat session
+# Update the chat initialization endpoint
 @app.post("/chat/init")
 async def init_chat(request: InitChatRequest, current_user: User = Depends(get_current_active_user)):
     try:
@@ -503,19 +503,45 @@ async def init_chat(request: InitChatRequest, current_user: User = Depends(get_c
         # Initialize chat engine
         chat_engine = index.as_chat_engine(verbose=True)
 
-        system_prompt = Config.get_system_prompt(request.systemPromptType)
-        chat_engine.chat_history.append(ChatMessage(role=MessageRole.SYSTEM, content=system_prompt))
+        # Fetch the system prompt for this material
+        conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT system_prompt
+            FROM assignments
+            WHERE student_id = ? AND material_id = ?
+        """, current_user.id, request.bookId)
+        result = cursor.fetchone()
+        conn.close()
+
+        if result and result.system_prompt:
+            system_prompt = result.system_prompt
+        else:
+            system_prompt = Config.get_system_prompt(request.systemPromptType)
+
+        # Add a strong emphasis on following the teacher's instructions
+        enhanced_system_prompt = f"""
+        You are an AI tutor assisting with the material: {request.bookId}.
+        The following is a special instruction from the teacher. It is crucial that you follow this guidance closely:
+
+        {system_prompt}
+
+        Always keep this instruction in mind when responding to the student's questions or providing explanations.
+        Your primary goal is to help the student learn according to the teacher's specified approach.
+        """
+
+        chat_engine.chat_history.append(ChatMessage(role=MessageRole.SYSTEM, content=enhanced_system_prompt))
 
         session_id = str(uuid.uuid4())
         chat_sessions[session_id] = chat_engine
 
         logger.info(f"Chat session initialized with ID: {session_id}")
-        return {"sessionId": session_id, "message": "Chat session initialized"}
+        return {"sessionId": session_id, "message": "Chat session initialized with teacher's instructions"}
     except Exception as e:
         logger.error(f"Error initializing chat: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-## Endpoint to handle chat messages
+# Update the chat message endpoint
 @app.post("/chat/message")
 async def chat_message(request: ChatMessageRequest, current_user: User = Depends(get_current_active_user)):
     try:
@@ -523,7 +549,11 @@ async def chat_message(request: ChatMessageRequest, current_user: User = Depends
         if not chat_engine:
             raise HTTPException(status_code=404, detail="Chat session not found")
         
-        response = chat_engine.chat(request.message)
+        # Remind the model of the teacher's instructions before each response
+        system_message = chat_engine.chat_history[0]  # Assuming the first message is the system prompt
+        reminder = "Remember to follow the teacher's instructions as specified earlier."
+        
+        response = chat_engine.chat(f"{reminder}\n\nUser: {request.message}")
         result = str(response)
         
         return {"reply": result}
