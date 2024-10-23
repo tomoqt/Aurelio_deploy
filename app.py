@@ -16,7 +16,7 @@ from typing import List, Dict, Optional, Union
 from openai import OpenAI
 from llama_index.llms.anthropic import Anthropic
 import pyodbc
-from azure.storage.blob import BlobServiceClient, ContainerClient
+from azure.storage.blob import BlobServiceClient, ContainerClient, BlobSasPermissions, generate_blob_sas
 from azure.identity import DefaultAzureCredential
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
@@ -425,10 +425,22 @@ async def get_pdf(filename: str, current_user: User = Depends(get_current_active
             logger.warning(f"PDF not found: {filename} for user {current_user.username}")
             raise HTTPException(status_code=404, detail="PDF not found")
         
-        stream = blob_client.download_blob()
-        return StreamingResponse(stream.chunks(), media_type="application/pdf")
+        # Generate SAS token for the blob with read permissions
+        sas_token = generate_blob_sas(
+            account_name=blob_service_client.account_name,
+            container_name=container_client.container_name,
+            blob_name=filename,
+            account_key=blob_service_client.credential.account_key,
+            permission=BlobSasPermissions(read=True),
+            expiry=datetime.utcnow() + timedelta(hours=1)  # Token expires in 1 hour
+        )
+        
+        # Construct the full URL with SAS token
+        blob_url = f"{blob_client.url}?{sas_token}"
+        
+        return {"url": blob_url}
     except Exception as e:
-        logger.error(f"Error retrieving PDF: {str(e)}")
+        logger.error(f"Error retrieving PDF URL: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Endpoint to select a book for chat
@@ -436,46 +448,44 @@ async def get_pdf(filename: str, current_user: User = Depends(get_current_active
 async def select_book(selection: BookSelection, current_user: User = Depends(get_current_active_user)):
     try:
         logger.info(f"Attempting to select book: {selection.bookId}")
-        file_path = UPLOADS_DIR / selection.bookId
+        
+        # Get the blob directly from storage
+        container_client = get_user_container_client(current_user.username)
+        blob_client = container_client.get_blob_client(selection.bookId)
+        
+        if not blob_client.exists():
+            logger.warning(f"Book not found in Blob Storage: {selection.bookId}")
+            raise HTTPException(status_code=404, detail="Book not found in storage")
 
-        if not file_path.exists():
-            logger.info(f"File {selection.bookId} not found in UPLOADS_DIR. Attempting to download from Blob Storage.")
-            # Attempt to download from Blob Storage
-            container_client = get_user_container_client(current_user.username)
-            blob_client = container_client.get_blob_client(selection.bookId)
-            if blob_client.exists():
-                try:
-                    with open(file_path, "wb") as f:
-                        download_stream = blob_client.download_blob()
-                        f.write(download_stream.readall())
-                    logger.info(f"Downloaded {selection.bookId} from Blob Storage to UPLOADS_DIR.")
-                except Exception as download_error:
-                    logger.error(f"Error downloading file from Blob Storage: {str(download_error)}")
-                    raise HTTPException(status_code=500, detail="Failed to download file from storage")
+        # Download the content directly to memory
+        blob_content = blob_client.download_blob().readall()
+        
+        # Create a temporary file just for reading the PDF content
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=True) as temp_pdf:
+            temp_pdf.write(blob_content)
+            temp_pdf.flush()
+            
+            # Load documents directly from the temporary file
+            documents = SimpleDirectoryReader(input_files=[temp_pdf.name]).load_data()
+            if not documents:
+                raise HTTPException(status_code=500, detail="Failed to load document content")
+
+            # Convert the loaded data into Document objects if necessary
+            if isinstance(documents, list) and not isinstance(documents[0], Document):
+                documents = [Document(text=doc.text, metadata=doc.metadata) for doc in documents]
+
+            # Update the index
+            global index
+            if index is None:
+                index = VectorStoreIndex.from_documents(documents)
             else:
-                logger.warning(f"Book not found in Blob Storage: {selection.bookId}")
-                raise HTTPException(status_code=404, detail="Book not found in storage")
+                index.insert_nodes(documents)
 
-        documents = SimpleDirectoryReader(input_files=[str(file_path)]).load_data()
-        if not documents:
-            raise HTTPException(status_code=500, detail="Failed to load document content")
-
-        # Convert the loaded data into Document objects if necessary
-        if isinstance(documents, list) and not isinstance(documents[0], Document):
-            documents = [Document(text=doc.text, metadata=doc.metadata) for doc in documents]
-
-        global index
-        if index is None:
-            index = VectorStoreIndex.from_documents(documents)
-        else:
-            index.insert_nodes(documents)
-
-        index.storage_context.persist(persist_dir=INDEX_STORAGE_PATH)
+            index.storage_context.persist(persist_dir=INDEX_STORAGE_PATH)
 
         logger.info(f"Book selected and indexed successfully: {selection.bookId}")
         return {"message": "Book selected and indexed successfully", "book_id": selection.bookId}
-    except HTTPException:
-        raise
+        
     except Exception as e:
         logger.error(f"Error selecting book: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
@@ -1015,3 +1025,4 @@ async def get_all_students(current_user: User = Depends(get_current_active_user)
     except Exception as e:
         logger.error(f"Error fetching students: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch students: {str(e)}")
+
