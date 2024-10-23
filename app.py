@@ -368,42 +368,26 @@ def get_user_container_client(username: str):
         container_client.create_container()
     return container_client
 
-# Update the get_user function to use caching
-def get_user(username: str):
-    return get_user_cached(username)
-
-# Add caching decorator for frequently accessed container clients
-@lru_cache(maxsize=50)
-def get_cached_container_client(username: str):
-    container_name = Config.get_user_container_name(username)
-    container_client = blob_service_client.get_container_client(container_name)
-    if not container_client.exists():
-        container_client.create_container()
-    return container_client
-
 @app.post("/pdf/upload")
-async def upload_pdf(
-    current_user: User = Depends(get_current_active_user),
-    background_tasks: BackgroundTasks = None,
-    pdf: UploadFile = File(...)
-):
+async def upload_pdf(pdf: UploadFile = File(...), current_user: User = Depends(get_current_active_user)):
     try:
-        container_client = get_cached_container_client(current_user.username)
+        container_client = get_user_container_client(current_user.username)
         filename = pdf.filename
         blob_client = container_client.get_blob_client(filename)
         
         content = await pdf.read()
+        blob_client.upload_blob(content, overwrite=True)
         
-        # Upload to blob storage
-        await blob_client.upload_blob(content, overwrite=True)
+        logger.info(f"PDF uploaded to Azure Blob Storage: {filename} for user {current_user.username}")
         
-        # Save locally
+        # Always save the uploaded PDF to UPLOADS_DIR
         upload_path = UPLOADS_DIR / filename
         with open(upload_path, "wb") as f:
             f.write(content)
-            
-        # Index the document
-            documents = SimpleDirectoryReader(input_files=[str(upload_path)]).load_data()
+        logger.info(f"PDF saved locally at: {upload_path}")
+        
+        # Load documents from the saved PDF file
+        documents = SimpleDirectoryReader(input_files=[str(upload_path)]).load_data()
         
         global index
         if index is None:
@@ -484,18 +468,19 @@ async def select_book(selection: BookSelection, current_user: User = Depends(get
         if index is None:
             index = VectorStoreIndex.from_documents(documents)
         else:
-            index.insert(documents)
-        
-        index.storage_context.persist(persist_dir=INDEX_STORAGE_PATH)
-        
-        logger.info(f"Book indexed with ID: {filename} for user {current_user.username}")
-        
-        return {"message": "File uploaded and indexed successfully", "book_id": filename}
-    except Exception as e:
-        logger.error(f"Error during PDF upload: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+            index.insert_nodes(documents)
 
-# Update chat initialization to use cached index
+        index.storage_context.persist(persist_dir=INDEX_STORAGE_PATH)
+
+        logger.info(f"Book selected and indexed successfully: {selection.bookId}")
+        return {"message": "Book selected and indexed successfully", "book_id": selection.bookId}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error selecting book: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
+
+# Update the chat initialization endpoint
 @app.post("/chat/init")
 async def init_chat(request: InitChatRequest, current_user: User = Depends(get_current_active_user)):
     try:
@@ -507,21 +492,34 @@ async def init_chat(request: InitChatRequest, current_user: User = Depends(get_c
         if not documents:
             raise HTTPException(status_code=500, detail="Failed to load document content")
 
-        # Use cached index
-        index = CachedVectorIndex.get_instance()
+        # Convert the loaded data into Document objects if necessary
+        if isinstance(documents, list) and not isinstance(documents[0], Document):
+            documents = [Document(text=doc.text, metadata=doc.metadata) for doc in documents]
+
+        # Insert documents into the index
+        index.insert_nodes(documents)
+        index.storage_context.persist(persist_dir=INDEX_STORAGE_PATH)
+
+        # Initialize chat engine
         chat_engine = index.as_chat_engine(verbose=True)
 
-        # Use connection pooling for database operations
-        with get_db() as db:
-            cursor = db.execute("""
-                SELECT system_prompt
-                FROM assignments
-                WHERE student_id = ? AND material_id = ?
-            """, current_user.id, request.bookId)
-            result = cursor.fetchone()
+        # Fetch the system prompt for this material
+        conn = pyodbc.connect(Config.AZURE_SQL_CONNECTION_STRING)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT system_prompt
+            FROM assignments
+            WHERE student_id = ? AND material_id = ?
+        """, current_user.id, request.bookId)
+        result = cursor.fetchone()
+        conn.close()
 
-        system_prompt = result.system_prompt if result else Config.get_system_prompt(request.systemPromptType)
+        if result and result.system_prompt:
+            system_prompt = result.system_prompt
+        else:
+            system_prompt = Config.get_system_prompt(request.systemPromptType)
 
+        # Add a strong emphasis on following the teacher's instructions
         enhanced_system_prompt = f"""
         You are an AI tutor assisting with the material: {request.bookId}.
         The following is a special instruction from the teacher. It is crucial that you follow this guidance closely:
@@ -537,6 +535,7 @@ async def init_chat(request: InitChatRequest, current_user: User = Depends(get_c
         session_id = str(uuid.uuid4())
         chat_sessions[session_id] = chat_engine
 
+        logger.info(f"Chat session initialized with ID: {session_id}")
         return {"sessionId": session_id, "message": "Chat session initialized with teacher's instructions"}
     except Exception as e:
         logger.error(f"Error initializing chat: {str(e)}", exc_info=True)
@@ -1016,4 +1015,3 @@ async def get_all_students(current_user: User = Depends(get_current_active_user)
     except Exception as e:
         logger.error(f"Error fetching students: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch students: {str(e)}")
-
